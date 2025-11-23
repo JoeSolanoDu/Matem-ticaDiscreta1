@@ -1,1 +1,281 @@
+"""
+UNIDAD 3 - ESTRUCTURAS DE DATOS DINÁMICAS LINEALES
+Sistema de Gestión de Procesos (Simulación de un SO sencillo)
+
+Este programa permite:
+- Crear procesos con nombre y prioridad.
+- Cambiar el estado de los procesos (Listo, Ejecución, Bloqueado, Terminado).
+- Planificar el siguiente proceso listo.
+- Buscar procesos por nombre.
+- Ordenar la cola de listos por prioridad.
+- Ver el historial de acciones (usando una pila).
+
+Estructuras usadas:
+- Diccionario (hash table) para almacenar procesos por PID.
+- Listas usadas como colas para listos y bloqueados.
+- Lista para procesos terminados.
+- Lista usada como pila para historial de acciones.
+"""
+
+
+# ----------------------------------------------------------
+# 1. CLASE Process: MODELO DE PROCESO
+# ----------------------------------------------------------
+
+class Process:
+    """
+    Representa un proceso del sistema.
+    pid       : identificador único del proceso (entero)
+    name      : nombre del proceso (cadena)
+    priority  : prioridad (1 = alta, 2 = media, 3 = baja)
+    state     : estado actual del proceso (cadena)
+    """
+
+    def __init__(self, pid: int, name: str, priority: int):
+        self.pid = pid
+        self.name = name
+        self.priority = priority
+        self.state = "Listo"  # estado inicial por defecto
+
+    def __str__(self):
+        """Devuelve una representación amigable del proceso."""
+        return f"[PID={self.pid} | Nombre={self.name} | Prioridad={self.priority} | Estado={self.state}]"
+
+
+# ----------------------------------------------------------
+# 2. CLASE ProcessManager: GESTIONA LAS ESTRUCTURAS DE DATOS
+# ----------------------------------------------------------
+
+class ProcessManager:
+    """
+    Administra todos los procesos y sus estructuras de datos:
+
+    processes     : diccionario {pid: Process}
+    ready_queue   : lista de pid, actúa como cola FIFO para procesos 'Listo'
+    blocked_queue : lista de pid, actúa como cola FIFO para procesos 'Bloqueado'
+    finished_list : lista de pid de procesos 'Terminado'
+    history_stack : lista de cadenas, actúa como pila LIFO de acciones
+    next_pid      : entero con el siguiente PID disponible
+    """
+
+    def __init__(self):
+        self.processes = {}
+        self.ready_queue = []
+        self.blocked_queue = []
+        self.finished_list = []
+        self.history_stack = []
+        self.next_pid = 1  # primer PID
+
+    # ----------------- Operaciones principales -----------------
+
+    def add_process(self, name: str, priority: int) -> Process:
+        """
+        Crea un nuevo proceso con nombre y prioridad.
+        Lo almacena en el diccionario y lo encola en la cola de listos.
+        """
+        pid = self.next_pid
+        self.next_pid += 1
+
+        proceso = Process(pid, name, priority)
+        self.processes[pid] = proceso
+
+        # El proceso inicia en estado 'Listo' → se encola en la cola de listos
+        self.ready_queue.append(pid)
+
+        # Registrar acción en la pila de historial
+        self.history_stack.append(f"Creado proceso PID={pid} ({name}) con prioridad {priority}")
+
+        return proceso
+
+    def get_process(self, pid: int) -> Process | None:
+        """Devuelve el proceso con ese PID, o None si no existe."""
+        return self.processes.get(pid)
+
+    def change_state(self, pid: int, new_state: str) -> bool:
+        """
+        Cambia el estado de un proceso y lo mueve entre las estructuras correspondientes.
+        new_state puede ser: 'Listo', 'Ejecución', 'Bloqueado', 'Terminado'.
+        """
+        proceso = self.get_process(pid)
+        if proceso is None:
+            return False  # PID no encontrado
+
+        # 1. Remover de la estructura correspondiente al estado actual
+        if proceso.state == "Listo" and pid in self.ready_queue:
+            self.ready_queue.remove(pid)
+        elif proceso.state == "Bloqueado" and pid in self.blocked_queue:
+            self.blocked_queue.remove(pid)
+        elif proceso.state == "Terminado" and pid in self.finished_list:
+            self.finished_list.remove(pid)
+
+        # 2. Actualizar el estado
+        proceso.state = new_state
+
+        # 3. Insertar en la nueva estructura según el estado
+        if new_state == "Listo":
+            self.ready_queue.append(pid)
+        elif new_state == "Bloqueado":
+            self.blocked_queue.append(pid)
+        elif new_state == "Terminado":
+            self.finished_list.append(pid)
+        # Nota: 'Ejecución' no se guarda en estructuras adicionales
+
+        # 4. Registrar en historial
+        self.history_stack.append(f"Cambio de estado: PID={pid} → {new_state}")
+        return True
+
+    def schedule_next(self) -> Process | None:
+        """
+        Toma el siguiente proceso de la cola de listos y lo pone en 'Ejecución'.
+        Devuelve el proceso planificado o None si la cola está vacía.
+        """
+        if not self.ready_queue:
+            return None
+
+        pid = self.ready_queue.pop(0)  # desencolar (FIFO)
+        proceso = self.get_process(pid)
+        if proceso:
+            proceso.state = "Ejecución"
+            self.history_stack.append(f"Planificado para ejecución: PID={pid}")
+        return proceso
+
+    # ----------------- Funciones de búsqueda y ordenación -----------------
+
+    def search_by_name(self, name: str) -> list:
+        """
+        Devuelve una lista de procesos cuyo nombre coincide con 'name'.
+        Búsqueda lineal sobre el diccionario de procesos.
+        """
+        resultado = []
+        for proceso in self.processes.values():
+            if proceso.name.lower() == name.lower():
+                resultado.append(proceso)
+        return resultado
+
+    def sort_ready_by_priority(self):
+        """
+        Ordena la cola de listos según la prioridad del proceso.
+        Menor número = mayor prioridad.
+        """
+        self.ready_queue.sort(key=lambda pid: self.processes[pid].priority)
+        self.history_stack.append("Cola de listos ordenada por prioridad")
+
+    # ----------------- Funciones de utilidad -----------------
+
+    def list_all_processes(self) -> list:
+        """Devuelve una lista con todos los procesos."""
+        return list(self.processes.values())
+
+    def show_history(self, limit: int = 10):
+        """
+        Muestra las últimas 'limit' acciones almacenadas en la pila de historial.
+        La cima de la pila es la última acción realizada.
+        """
+        print("\n=== Historial de acciones (últimas) ===")
+        # Recorremos la pila desde el final (última acción) hacia atrás
+        for action in self.history_stack[-limit:][::-1]:
+            print("-", action)
+
+
+# ----------------------------------------------------------
+# 3. INTERFAZ DE USUARIO (MENÚ EN CONSOLA)
+# ----------------------------------------------------------
+
+def mostrar_menu():
+    print("\n========= MENÚ DE GESTIÓN DE PROCESOS =========")
+    print("1. Agregar proceso")
+    print("2. Listar todos los procesos")
+    print("3. Planificar siguiente proceso (Ejecución)")
+    print("4. Cambiar estado de un proceso")
+    print("5. Buscar procesos por nombre")
+    print("6. Ordenar cola de listos por prioridad")
+    print("7. Ver historial de acciones")
+    print("0. Salir")
+
+
+def main():
+    gestor = ProcessManager()
+
+    while True:
+        mostrar_menu()
+        opcion = input("Seleccione una opción: ")
+
+        if opcion == "1":
+            # Agregar proceso
+            nombre = input("Nombre del proceso: ")
+            try:
+                prioridad = int(input("Prioridad (1=alta, 2=media, 3=baja): "))
+            except ValueError:
+                print("Prioridad inválida. Debe ser un número entero.")
+                continue
+
+            proceso = gestor.add_process(nombre, prioridad)
+            print("Proceso agregado:", proceso)
+
+        elif opcion == "2":
+            # Listar todos los procesos
+            print("\n=== Lista de todos los procesos ===")
+            for p in gestor.list_all_processes():
+                print(p)
+
+        elif opcion == "3":
+            # Planificar siguiente proceso
+            proceso = gestor.schedule_next()
+            if proceso:
+                print("Proceso en ejecución:", proceso)
+            else:
+                print("No hay procesos en la cola de listos.")
+
+        elif opcion == "4":
+            # Cambiar estado
+            try:
+                pid = int(input("PID del proceso: "))
+            except ValueError:
+                print("PID inválido.")
+                continue
+
+            print("Estados posibles: Listo, Ejecución, Bloqueado, Terminado")
+            nuevo_estado = input("Nuevo estado: ")
+
+            if nuevo_estado not in ["Listo", "Ejecución", "Bloqueado", "Terminado"]:
+                print("Estado inválido.")
+                continue
+
+            exito = gestor.change_state(pid, nuevo_estado)
+            if exito:
+                print(f"Estado de PID={pid} cambiado a {nuevo_estado}.")
+            else:
+                print("No se encontró ningún proceso con ese PID.")
+
+        elif opcion == "5":
+            # Buscar por nombre
+            nombre = input("Nombre del proceso a buscar: ")
+            encontrados = gestor.search_by_name(nombre)
+            if encontrados:
+                print("Procesos encontrados:")
+                for p in encontrados:
+                    print(p)
+            else:
+                print("No se encontraron procesos con ese nombre.")
+
+        elif opcion == "6":
+            # Ordenar cola de listos por prioridad
+            gestor.sort_ready_by_priority()
+            print("Cola de listos ordenada por prioridad.")
+
+        elif opcion == "7":
+            # Ver historial de acciones
+            gestor.show_history()
+
+        elif opcion == "0":
+            print("Saliendo del sistema...")
+            break
+
+        else:
+            print("Opción no válida. Intente nuevamente.")
+
+
+# Punto de entrada del programa
+if __name__ == "__main__":
+    main()
 
